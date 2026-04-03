@@ -1,0 +1,26 @@
+# Backend
+back/vendor/
+back/.env
+back/storage/app/public/branding/
+back/storage/framework/cache/*
+back/storage/framework/sessions/*
+back/storage/framework/views/*
+back/storage/logs/*
+back/bootstrap/cache/*
+!back/storage/framework/cache/.gitkeep
+!back/storage/framework/sessions/.gitkeep
+!back/storage/framework/views/.gitkeep
+!back/storage/logs/.gitkeep
+!back/bootstrap/cache/.gitkeep
+
+# Frontend
+front/node_modules/
+front/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
