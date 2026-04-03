@@ -66,14 +66,9 @@ async function handleLogin() {
       <!-- Background image or gradient fallback -->
       <div class="absolute inset-0">
         <img
-          v-if="branding.login_banner_url"
-          :src="branding.login_banner_url"
+          :src="branding.login_banner_url || '/login-ads.png'"
           alt="Banner"
           class="h-full w-full object-cover"
-        />
-        <div
-          v-else
-          class="h-full w-full bg-gradient-to-br from-blue-600 via-blue-500 to-indigo-600"
         />
       </div>
 
