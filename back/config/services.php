@@ -35,6 +35,12 @@ return [
         ],
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_LOGIN_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_LOGIN_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_LOGIN_REDIRECT_URI'),
+    ],
+
     'google_ads' => [
         'client_id' => env('GOOGLE_ADS_CLIENT_ID'),
         'client_secret' => env('GOOGLE_ADS_CLIENT_SECRET'),

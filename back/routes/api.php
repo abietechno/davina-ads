@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AdAccountController;
 use App\Http\Controllers\Api\AdsAnalyticsController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CompanySettingController;
+use App\Http\Controllers\Api\GoogleAuthController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
@@ -11,6 +12,10 @@ use Illuminate\Support\Facades\Route;
 // Public
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/company-settings', [CompanySettingController::class, 'show']);
+
+// Google OAuth
+Route::get('/auth/google/redirect', [GoogleAuthController::class, 'redirect']);
+Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback']);
 
 // Protected
 Route::middleware('auth:sanctum')->group(function () {
