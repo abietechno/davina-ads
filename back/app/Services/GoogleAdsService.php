@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 class GoogleAdsService
 {
     private const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-    private const ADS_API_URL = 'https://googleads.googleapis.com/v17/customers';
+    private const ADS_API_URL = 'https://googleads.googleapis.com/v23/customers';
 
     private function buildQuery(string $level, string $startDate, string $endDate): string
     {
