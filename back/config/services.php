@@ -45,6 +45,7 @@ return [
         'client_id' => env('GOOGLE_ADS_CLIENT_ID'),
         'client_secret' => env('GOOGLE_ADS_CLIENT_SECRET'),
         'developer_token' => env('GOOGLE_ADS_DEVELOPER_TOKEN'),
+        'mcc_id' => env('GOOGLE_ADS_MCC_ID'),
     ],
 
 ];

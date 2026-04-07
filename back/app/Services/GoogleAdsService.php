@@ -73,20 +73,34 @@ class GoogleAdsService
 
         $accessToken = $tokenResponse->json('access_token');
         $customerId = str_replace('-', '', $account->account_id);
+        $mccId = config('services.google_ads.mcc_id');
 
         try {
             $query = $this->buildQuery($level, $startDate, $endDate);
 
-            $response = Http::withHeaders([
+            $headers = [
                 'Authorization' => "Bearer {$accessToken}",
                 'developer-token' => $developerToken,
-            ])->post(self::ADS_API_URL . "/{$customerId}/googleAds:searchStream", [
-                'query' => $query,
-            ]);
+            ];
+
+            // Add MCC login-customer-id if configured
+            if ($mccId) {
+                $headers['login-customer-id'] = str_replace('-', '', $mccId);
+            }
+
+            $response = Http::withHeaders($headers)
+                ->post(self::ADS_API_URL . "/{$customerId}/googleAds:searchStream", [
+                    'query' => $query,
+                ]);
 
             if ($response->failed()) {
-                $error = $response->json('error.message', 'Google Ads API query failed');
-                Log::error('Google Ads API error', ['customer_id' => $customerId, 'error' => $error]);
+                $body = $response->body();
+                $error = $response->json('error.message') ?: $response->json('0.error.message') ?: substr($body, 0, 300);
+                Log::error('Google Ads API error', [
+                    'customer_id' => $customerId,
+                    'status' => $response->status(),
+                    'error' => $error,
+                ]);
                 $results['errors'][] = $error;
                 return $results;
             }
