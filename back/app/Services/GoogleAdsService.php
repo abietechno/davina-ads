@@ -26,16 +26,10 @@ class GoogleAdsService
             'ad'       => 'ad_group_ad',
         };
 
-        $statusField = match ($level) {
-            'campaign' => 'campaign.status',
-            'adset'    => 'ad_group.status',
-            'ad'       => 'ad_group_ad.status',
-        };
-
-        return "SELECT {$fields}, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.reach, segments.date "
+        return "SELECT {$fields}, metrics.cost_micros, metrics.impressions, metrics.clicks, segments.date "
             . "FROM {$resource} "
             . "WHERE segments.date BETWEEN '{$startDate}' AND '{$endDate}' "
-            . "AND {$statusField} != 'REMOVED' "
+            . "AND campaign.status != 'REMOVED' "
             . "ORDER BY segments.date ASC";
     }
 
@@ -111,7 +105,8 @@ class GoogleAdsService
                     $campaignId = $row['campaign']['id'] ?? null;
                     if (! $date || ! $campaignId) continue;
 
-                    $spend = ($row['metrics']['costMicros'] ?? 0) / 1_000_000;
+                    $costMicros = (int) ($row['metrics']['costMicros'] ?? 0);
+                    $spend = $costMicros / 1_000_000;
 
                     $uniqueKey = [
                         'client_ad_account_id' => $account->id,
@@ -125,7 +120,6 @@ class GoogleAdsService
                         'spend' => $spend,
                         'impressions' => (int) ($row['metrics']['impressions'] ?? 0),
                         'clicks' => (int) ($row['metrics']['clicks'] ?? 0),
-                        'reach' => (int) ($row['metrics']['reach'] ?? 0),
                     ];
 
                     if (\in_array($level, ['adset', 'ad'])) {
