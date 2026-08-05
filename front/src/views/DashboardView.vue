@@ -47,6 +47,8 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  FileDown,
+  FileSpreadsheet,
 } from 'lucide-vue-next'
 import SpendTrendChart from '@/components/charts/SpendTrendChart.vue'
 import ImpressionsChart from '@/components/charts/ImpressionsChart.vue'
@@ -64,6 +66,8 @@ const syncing = ref(false)
 const loadingAccounts = ref(true)
 const loadingStats = ref(false)
 const sheetOpen = ref(false)
+const exportingPdf = ref(false)
+const exportingExcel = ref(false)
 
 const levelOptions = [
   { value: 'campaign', label: 'Campaign' },
@@ -209,6 +213,53 @@ async function handleSync() {
   }
 }
 
+async function handleExport(format) {
+  if (!selectedAccount.value) return
+  const isExcel = format === 'excel'
+  if (isExcel) exportingExcel.value = true
+  else exportingPdf.value = true
+
+  try {
+    const response = await api.get(`/export/${format}`, {
+      params: {
+        client_ad_account_id: selectedAccount.value,
+        start_date: startDate.value,
+        end_date: endDate.value,
+        level: selectedLevel.value,
+      },
+      responseType: 'blob',
+    })
+
+    // Create download link
+    const blob = new Blob([response.data], {
+      type: isExcel
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : 'application/pdf',
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+
+    const accountName = selectedAccountName().replace(/[^a-zA-Z0-9]/g, '_')
+    const ext = isExcel ? 'xlsx' : 'pdf'
+    link.download = `ads-report-${accountName}-${startDate.value}-to-${endDate.value}.${ext}`
+
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+
+    toast.success(`${isExcel ? 'Excel' : 'PDF'} berhasil didownload`)
+  } catch (err) {
+    toast.error(`Export ${format} gagal`, {
+      description: err.response?.data?.message || err.message,
+    })
+  } finally {
+    if (isExcel) exportingExcel.value = false
+    else exportingPdf.value = false
+  }
+}
+
 watch([selectedAccount, selectedLevel, startDate, endDate], () => fetchStats())
 
 onMounted(async () => {
@@ -281,6 +332,32 @@ function getCtr(clicks, impressions) {
           </div>
 
           <div class="flex items-center gap-2">
+            <!-- Export PDF -->
+            <Button
+              size="sm"
+              variant="outline"
+              class="gap-1.5 rounded-xl"
+              :disabled="exportingPdf || !selectedAccount || dailyMetrics.length === 0"
+              @click="handleExport('pdf')"
+            >
+              <Loader2 v-if="exportingPdf" class="h-4 w-4 animate-spin" />
+              <FileDown v-else class="h-4 w-4" />
+              <span class="hidden sm:inline">PDF</span>
+            </Button>
+
+            <!-- Export Excel -->
+            <Button
+              size="sm"
+              variant="outline"
+              class="gap-1.5 rounded-xl"
+              :disabled="exportingExcel || !selectedAccount || dailyMetrics.length === 0"
+              @click="handleExport('excel')"
+            >
+              <Loader2 v-if="exportingExcel" class="h-4 w-4 animate-spin" />
+              <FileSpreadsheet v-else class="h-4 w-4" />
+              <span class="hidden sm:inline">Excel</span>
+            </Button>
+
             <!-- Sync button -->
             <Button
               size="sm"

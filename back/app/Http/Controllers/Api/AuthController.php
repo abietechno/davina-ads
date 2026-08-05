@@ -26,6 +26,12 @@ class AuthController extends Controller
             ]);
         }
 
+        if (! $user->isApproved()) {
+            throw ValidationException::withMessages([
+                'email' => ['Your account is pending approval from an admin.'],
+            ]);
+        }
+
         $token = $user->createToken('spa-token')->plainTextToken;
 
         return response()->json([

@@ -1,6 +1,6 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDarkMode } from '@/composables/useDarkMode'
 import api from '@/api/axios'
@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { BarChart3, Loader2, Sun, Moon } from 'lucide-vue-next'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const { isDark, toggle: toggleDark } = useDarkMode()
 
@@ -17,6 +18,11 @@ const form = reactive({ email: '', password: '' })
 const loading = ref(false)
 const loadingGoogle = ref(false)
 const errorMessage = ref('')
+
+const AUTH_ERROR_MESSAGES = {
+  pending_approval: 'Your account is pending approval from an admin.',
+  google_auth_failed: 'Google sign-in failed. Please try again.',
+}
 
 // Company branding from API
 const branding = reactive({
@@ -27,6 +33,10 @@ const branding = reactive({
 })
 
 onMounted(async () => {
+  if (route.query.error) {
+    errorMessage.value = AUTH_ERROR_MESSAGES[route.query.error] || 'Something went wrong. Please try again.'
+  }
+
   try {
     const { data } = await api.get('/company-settings')
     if (data.data) {

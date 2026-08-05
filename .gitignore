@@ -1,6 +1,7 @@
 # Backend
 back/vendor/
 back/.env
+back/env-prod
 back/storage/app/public/branding/
 back/storage/framework/cache/*
 back/storage/framework/sessions/*
@@ -16,10 +17,17 @@ back/bootstrap/cache/*
 # Frontend
 front/node_modules/
 front/dist/
+front/.env
+
+# API (Vercel serverless functions)
+node_modules/
+.env
+.vercel/
 
 # IDE
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 .DS_Store

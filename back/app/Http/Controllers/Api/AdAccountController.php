@@ -11,7 +11,8 @@ class AdAccountController extends Controller
 {
     public function index(): JsonResponse
     {
-        $accounts = ClientAdAccount::all();
+        // Tokens/API keys are write-only via this endpoint; never returned in listings.
+        $accounts = ClientAdAccount::select('id', 'platform', 'account_name', 'account_id', 'created_at', 'updated_at')->get();
 
         return response()->json([
             'success' => true,

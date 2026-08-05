@@ -1,0 +1,23 @@
+{
+  "name": "ads-pulsepowerhub-api",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Vercel serverless API for ads.pulsepowerhub.id (Node/TypeScript + Supabase)",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "bcryptjs": "^2.4.3",
+    "exceljs": "^4.4.0",
+    "formidable": "^3.5.1",
+    "jsonwebtoken": "^9.0.2",
+    "pdfkit": "^0.15.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/formidable": "^3.4.5",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.5.0",
+    "@types/pdfkit": "^0.13.4",
+    "@vercel/node": "^3.2.24",
+    "typescript": "^5.5.4"
+  }
+}

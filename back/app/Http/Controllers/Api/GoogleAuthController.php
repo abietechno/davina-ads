@@ -35,23 +35,31 @@ class GoogleAuthController extends Controller
             return redirect($frontendUrl . '/login?error=google_auth_failed');
         }
 
+        $frontendUrl = env('FRONTEND_URL', 'https://ads.pulsepowerhub.id');
+
         // Find existing user or create new one
         $user = User::where('email', $googleUser->getEmail())->first();
 
         if (! $user) {
+            $isDesignatedAdmin = strcasecmp($googleUser->getEmail(), config('services.app_admin.email')) === 0;
+
             $user = User::create([
                 'name' => $googleUser->getName(),
                 'email' => $googleUser->getEmail(),
                 'password' => Hash::make(Str::random(24)),
+                'role' => $isDesignatedAdmin ? 'admin' : 'user',
+                'status' => $isDesignatedAdmin ? 'approved' : 'pending',
             ]);
+        }
+
+        if (! $user->isApproved()) {
+            return redirect($frontendUrl . '/login?error=pending_approval');
         }
 
         // Create Sanctum token
         $token = $user->createToken('google-login')->plainTextToken;
 
         // Redirect to frontend with token
-        $frontendUrl = env('FRONTEND_URL', 'https://ads.pulsepowerhub.id');
-
         return redirect($frontendUrl . '/auth/callback?token=' . $token . '&name=' . urlencode($user->name));
     }
 }

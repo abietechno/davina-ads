@@ -12,7 +12,7 @@ class UserController extends Controller
 {
     public function index(): JsonResponse
     {
-        $users = User::select('id', 'name', 'email', 'created_at')->latest()->get();
+        $users = User::select('id', 'name', 'email', 'role', 'status', 'created_at')->latest()->get();
 
         return response()->json([
             'success' => true,
@@ -32,6 +32,9 @@ class UserController extends Controller
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
+            // Created directly by an admin, so no approval step needed.
+            'role' => 'user',
+            'status' => 'approved',
         ]);
 
         return response()->json([
@@ -41,9 +44,30 @@ class UserController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'role' => $user->role,
+                'status' => $user->status,
                 'created_at' => $user->created_at,
             ],
         ], 201);
+    }
+
+    public function approve(User $user): JsonResponse
+    {
+        $user->status = 'approved';
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'User approved.',
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'status' => $user->status,
+                'created_at' => $user->created_at,
+            ],
+        ]);
     }
 
     public function update(Request $request, User $user): JsonResponse
@@ -75,6 +99,8 @@ class UserController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'role' => $user->role,
+                'status' => $user->status,
                 'created_at' => $user->created_at,
             ],
         ]);

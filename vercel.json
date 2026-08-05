@@ -1,0 +1,16 @@
+{
+  "buildCommand": "cd front && npm install && npm run build",
+  "outputDirectory": "front/dist",
+  "installCommand": "npm install",
+  "functions": {
+    "api/sync/*.ts": { "maxDuration": 60 },
+    "api/sync-all.ts": { "maxDuration": 60 },
+    "api/cron/*.ts": { "maxDuration": 60 }
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/daily-sync", "schedule": "0 20 * * *" }
+  ]
+}

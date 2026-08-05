@@ -41,6 +41,10 @@ return [
         'redirect' => env('GOOGLE_LOGIN_REDIRECT_URI'),
     ],
 
+    'app_admin' => [
+        'email' => env('ADMIN_EMAIL', 'abietechno.id@gmail.com'),
+    ],
+
     'google_ads' => [
         'client_id' => env('GOOGLE_ADS_CLIENT_ID'),
         'client_secret' => env('GOOGLE_ADS_CLIENT_SECRET'),
