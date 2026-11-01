@@ -44,6 +44,9 @@ import {
   Eye,
   MousePointerClick,
   TrendingUp,
+  MessageCircle,
+  Wallet,
+  Coins,
   Loader2,
   Plus,
   RefreshCw,
@@ -80,7 +83,13 @@ const stats = ref({
   total_impressions: 0,
   total_clicks: 0,
   ctr: 0,
+  total_conversions: 0,
+  total_revenue: 0,
+  cpc: null,
+  cost_per_conversion: null,
+  roas: null,
 })
+const accountInfo = ref(null)
 const dailyMetrics = ref([])
 const trendData = ref([])
 const breakdownData = ref([])
@@ -94,14 +103,33 @@ const accountForm = reactive({
 })
 const submitting = ref(false)
 
-function getDefaultStartDate() {
+// YYYY-MM-DD in the browser's local timezone. toISOString() would give the UTC date,
+// which in WIB/WITA is still "yesterday" until 07:00/08:00 and shows an empty report.
+function toLocalDate(d) {
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${month}-${day}`
+}
+
+function daysAgo(n) {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return toLocalDate(d)
+}
+
+function getMonthStartDate() {
   const d = new Date()
   d.setDate(1)
-  return d.toISOString().split('T')[0]
+  return toLocalDate(d)
+}
+
+// Default to the last 30 days so the first days of a month don't open on an empty report
+function getDefaultStartDate() {
+  return daysAgo(29)
 }
 
 function getDefaultEndDate() {
-  return new Date().toISOString().split('T')[0]
+  return toLocalDate(new Date())
 }
 
 // ── API calls ────────────────────────────────
@@ -124,6 +152,9 @@ async function fetchAccounts() {
 
 async function fetchStats() {
   if (!selectedAccount.value || !startDate.value || !endDate.value) return
+  // Skip while a date is half-typed or the range is reversed instead of flashing a 422 error
+  const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v))
+  if (!isDate(startDate.value) || !isDate(endDate.value) || endDate.value < startDate.value) return
   loadingStats.value = true
   try {
     const { data } = await api.get('/ads/stats', {
@@ -135,6 +166,7 @@ async function fetchStats() {
       },
     })
     stats.value = data.data.summary
+    accountInfo.value = data.data.account || null
     dailyMetrics.value = data.data.daily
     trendData.value = data.data.trend || []
     breakdownData.value = data.data.breakdown || []
@@ -154,8 +186,8 @@ async function fetchStats() {
 
 async function handleAddAccount() {
   const f = accountForm
-  if (!f.platform || !f.account_name || !f.account_id || !f.access_token) {
-    toast.error('Please fill in all fields')
+  if (!f.platform || !f.account_name || !f.account_id) {
+    toast.error('Platform, name and ID are required')
     return
   }
   submitting.value = true
@@ -208,6 +240,8 @@ async function handleSync() {
     const msg = err.response?.data?.message || err.message
     const errors = err.response?.data?.data?.errors || []
     toast.error('Sync failed', { description: errors[0] || msg })
+    // Refresh so the "Last sync failed" banner shows the reason
+    await fetchStats()
   } finally {
     syncing.value = false
   }
@@ -310,6 +344,34 @@ function getCtr(clicks, impressions) {
   if (!impressions) return '0.00%'
   return ((clicks / impressions) * 100).toFixed(2) + '%'
 }
+
+// Meta accounts set to a messaging action_type report WhatsApp/Messenger conversations as conversions
+function isMessagingAccount() {
+  return (accountInfo.value?.conversion_action_type || '').includes('messaging')
+}
+
+function conversionLabel() {
+  return isMessagingAccount() ? 'WA Conversations' : 'Conversions'
+}
+
+function costPerConversionLabel() {
+  return isMessagingAccount() ? 'Cost / Conversation' : 'Cost / Conversion'
+}
+
+function formatMaybeCurrency(v) {
+  return v === null || v === undefined ? '—' : formatCurrency(v)
+}
+
+function roasClass(v) {
+  if (v >= 4) return 'text-emerald-500'
+  if (v >= 2.5) return 'text-amber-500'
+  return 'text-red-500'
+}
+
+function formatLastSynced(v) {
+  if (!v) return 'never'
+  return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(v))
+}
 </script>
 
 <template>
@@ -327,6 +389,9 @@ function getCtr(clicks, impressions) {
               <h1 class="font-display text-xl font-bold tracking-tight sm:text-2xl">Dashboard</h1>
               <p class="mt-0.5 text-sm text-muted-foreground">
                 {{ selectedAccountName() }}
+              </p>
+              <p v-if="accountInfo" class="text-xs text-muted-foreground/80">
+                Terakhir diperbarui: {{ formatLastSynced(accountInfo.last_synced_at) }}
               </p>
             </div>
           </div>
@@ -415,13 +480,11 @@ function getCtr(clicks, impressions) {
                   />
                 </div>
                 <div class="space-y-2">
-                  <Label>
-                    {{ accountForm.platform === 'google' ? 'API Key / Refresh Token' : 'Access Token' }}
-                  </Label>
+                  <Label>Access Token (optional)</Label>
                   <Input
                     v-model="accountForm.access_token"
                     type="password"
-                    placeholder="Paste your token here"
+                    placeholder="Leave empty to use the server token"
                     class="rounded-xl"
                   />
                 </div>
@@ -501,7 +564,7 @@ function getCtr(clicks, impressions) {
                     variant="outline"
                     size="sm"
                     class="flex-1 rounded-xl"
-                    @click="startDate = getDefaultStartDate(); endDate = getDefaultEndDate()"
+                    @click="startDate = getMonthStartDate(); endDate = getDefaultEndDate()"
                   >
                     This Month
                   </Button>
@@ -509,14 +572,17 @@ function getCtr(clicks, impressions) {
                     variant="outline"
                     size="sm"
                     class="flex-1 rounded-xl"
-                    @click="() => {
-                      const d = new Date()
-                      d.setDate(d.getDate() - 7)
-                      startDate = d.toISOString().split('T')[0]
-                      endDate = getDefaultEndDate()
-                    }"
+                    @click="startDate = daysAgo(6); endDate = getDefaultEndDate()"
                   >
                     Last 7 Days
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="flex-1 rounded-xl"
+                    @click="startDate = daysAgo(29); endDate = getDefaultEndDate()"
+                  >
+                    Last 30 Days
                   </Button>
                 </div>
               </div>
@@ -549,6 +615,17 @@ function getCtr(clicks, impressions) {
       </div>
 
       <template v-else>
+        <!-- Why the last sync failed (e.g. platform access not approved yet) -->
+        <div
+          v-if="accountInfo?.last_sync_status === 'failed' && accountInfo.last_sync_error"
+          class="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm"
+        >
+          <p class="font-medium text-red-500">
+            Last sync failed{{ accountInfo.last_sync_attempt_at ? ` (${formatLastSynced(accountInfo.last_sync_attempt_at)})` : '' }}
+          </p>
+          <p class="mt-1 break-words text-muted-foreground">{{ accountInfo.last_sync_error }}</p>
+        </div>
+
         <!-- Summary Cards -->
         <div class="grid gap-3 grid-cols-2 lg:grid-cols-4">
           <Card>
@@ -599,6 +676,59 @@ function getCtr(clicks, impressions) {
               <Skeleton v-if="loadingStats" class="h-7 w-16" />
               <p v-else class="font-display text-xl font-bold sm:text-2xl">
                 {{ stats.ctr }}%
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader class="flex flex-row items-center justify-between pb-1 pt-4 px-4">
+              <CardTitle class="text-xs font-medium text-muted-foreground">{{ conversionLabel() }}</CardTitle>
+              <MessageCircle class="h-3.5 w-3.5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent class="px-4 pb-4">
+              <Skeleton v-if="loadingStats" class="h-7 w-16" />
+              <p v-else class="font-display text-xl font-bold sm:text-2xl">
+                {{ formatNumber(stats.total_conversions ?? 0) }}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader class="flex flex-row items-center justify-between pb-1 pt-4 px-4">
+              <CardTitle class="text-xs font-medium text-muted-foreground">{{ costPerConversionLabel() }}</CardTitle>
+              <Wallet class="h-3.5 w-3.5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent class="px-4 pb-4">
+              <Skeleton v-if="loadingStats" class="h-7 w-24" />
+              <p v-else class="font-display text-xl font-bold sm:text-2xl">
+                {{ formatMaybeCurrency(stats.cost_per_conversion) }}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader class="flex flex-row items-center justify-between pb-1 pt-4 px-4">
+              <CardTitle class="text-xs font-medium text-muted-foreground">CPC</CardTitle>
+              <Coins class="h-3.5 w-3.5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent class="px-4 pb-4">
+              <Skeleton v-if="loadingStats" class="h-7 w-24" />
+              <p v-else class="font-display text-xl font-bold sm:text-2xl">
+                {{ formatMaybeCurrency(stats.cpc) }}
+              </p>
+            </CardContent>
+          </Card>
+
+          <!-- ROAS only means something when the account reports purchase value -->
+          <Card v-if="stats.total_revenue > 0">
+            <CardHeader class="flex flex-row items-center justify-between pb-1 pt-4 px-4">
+              <CardTitle class="text-xs font-medium text-muted-foreground">ROAS</CardTitle>
+              <TrendingUp class="h-3.5 w-3.5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent class="px-4 pb-4">
+              <Skeleton v-if="loadingStats" class="h-7 w-16" />
+              <p v-else class="font-display text-xl font-bold sm:text-2xl" :class="roasClass(stats.roas)">
+                {{ stats.roas }}x
               </p>
             </CardContent>
           </Card>
@@ -690,6 +820,7 @@ function getCtr(clicks, impressions) {
                     <TableHead class="text-right">Spend</TableHead>
                     <TableHead class="text-right hidden sm:table-cell">Impr.</TableHead>
                     <TableHead class="text-right hidden sm:table-cell">Clicks</TableHead>
+                    <TableHead class="text-right">{{ isMessagingAccount() ? 'WA' : 'Conv.' }}</TableHead>
                     <TableHead class="text-right pr-4">CTR</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -709,6 +840,7 @@ function getCtr(clicks, impressions) {
                     <TableCell class="text-right text-sm whitespace-nowrap">{{ formatCurrency(row.spend) }}</TableCell>
                     <TableCell class="text-right text-sm hidden sm:table-cell">{{ formatNumber(row.impressions) }}</TableCell>
                     <TableCell class="text-right text-sm hidden sm:table-cell">{{ formatNumber(row.clicks) }}</TableCell>
+                    <TableCell class="text-right text-sm">{{ formatNumber(Number(row.conversions ?? 0)) }}</TableCell>
                     <TableCell class="text-right pr-4">
                       <Badge variant="secondary" class="rounded-lg text-xs font-medium">
                         {{ getCtr(row.clicks, row.impressions) }}

@@ -24,6 +24,8 @@ class DailyAdMetric extends Model
         'impressions',
         'clicks',
         'reach',
+        'conversions',
+        'revenue',
     ];
 
     protected function casts(): array
@@ -34,6 +36,8 @@ class DailyAdMetric extends Model
             'impressions' => 'integer',
             'clicks' => 'integer',
             'reach' => 'integer',
+            'conversions' => 'decimal:2',
+            'revenue' => 'decimal:2',
         ];
     }
 

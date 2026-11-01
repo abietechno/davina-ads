@@ -4,14 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ClientAdAccount;
-use App\Services\GoogleAdsService;
-use App\Services\MetaAdsService;
+use App\Services\Ads\AdSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class SyncController extends Controller
 {
-    public function sync(Request $request, ClientAdAccount $clientAdAccount): JsonResponse
+    public function sync(Request $request, ClientAdAccount $clientAdAccount, AdSyncService $syncs): JsonResponse
     {
         $validated = $request->validate([
             'start_date' => 'required|date',
@@ -21,12 +20,7 @@ class SyncController extends Controller
 
         $level = $validated['level'] ?? 'campaign';
 
-        $service = match ($clientAdAccount->platform) {
-            'meta' => new MetaAdsService(),
-            'google' => new GoogleAdsService(),
-        };
-
-        $result = $service->sync(
+        $result = $syncs->sync(
             $clientAdAccount,
             $validated['start_date'],
             $validated['end_date'],
@@ -48,22 +42,15 @@ class SyncController extends Controller
         ]);
     }
 
-    public function syncAll(Request $request): JsonResponse
+    public function syncAll(Request $request, AdSyncService $syncs): JsonResponse
     {
         $level = $request->input('level', 'campaign');
-        $accounts = ClientAdAccount::all();
-        $startDate = now()->subDays(7)->format('Y-m-d');
-        $endDate = now()->format('Y-m-d');
+        $accounts = ClientAdAccount::where('is_active', true)->get();
         $totalSynced = 0;
         $allErrors = [];
 
         foreach ($accounts as $account) {
-            $service = match ($account->platform) {
-                'meta' => new MetaAdsService(),
-                'google' => new GoogleAdsService(),
-            };
-
-            $result = $service->sync($account, $startDate, $endDate, $level);
+            $result = $syncs->syncLastDays($account, 7, $level);
             $totalSynced += $result['synced'];
 
             if (! empty($result['errors'])) {

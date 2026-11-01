@@ -45,11 +45,22 @@ return [
         'email' => env('ADMIN_EMAIL', 'abietechno.id@gmail.com'),
     ],
 
+    'meta' => [
+        'api_version' => env('META_API_VERSION', 'v26.0'),
+        // Business Manager System User token (never expires); per-account tokens are only a fallback
+        'system_user_token' => env('META_SYSTEM_USER_TOKEN'),
+        'default_conversion_action_type' => env('META_DEFAULT_CONVERSION_ACTION_TYPE', 'purchase'),
+    ],
+
     'google_ads' => [
         'client_id' => env('GOOGLE_ADS_CLIENT_ID'),
         'client_secret' => env('GOOGLE_ADS_CLIENT_SECRET'),
-        'developer_token' => env('GOOGLE_ADS_DEVELOPER_TOKEN'),
         'mcc_id' => env('GOOGLE_ADS_MCC_ID'),
+        'api_version' => env('GOOGLE_ADS_API_VERSION', 'v26'),
+        // Optional fallback; normally the refresh token comes from the admin "Connect Google Ads" button (ad_platform_connections)
+        'refresh_token' => env('GOOGLE_ADS_REFRESH_TOKEN'),
+        // Defaults to APP_URL/api/auth/google-ads/callback; must also be listed in Google Cloud Console
+        'redirect' => env('GOOGLE_ADS_REDIRECT_URI'),
     ],
 
 ];

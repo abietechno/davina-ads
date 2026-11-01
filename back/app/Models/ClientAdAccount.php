@@ -14,6 +14,10 @@ class ClientAdAccount extends Model
         'platform',
         'account_name',
         'account_id',
+        'currency',
+        'timezone',
+        'conversion_action_type',
+        'is_active',
         'access_token',
         'api_key_or_refresh_token',
         'last_synced_at',
@@ -24,8 +28,21 @@ class ClientAdAccount extends Model
         'api_key_or_refresh_token',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+            'last_synced_at' => 'datetime',
+        ];
+    }
+
     public function dailyAdMetrics(): HasMany
     {
         return $this->hasMany(DailyAdMetric::class);
+    }
+
+    public function syncRuns(): HasMany
+    {
+        return $this->hasMany(AdSyncRun::class);
     }
 }

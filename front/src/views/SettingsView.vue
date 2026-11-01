@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/axios'
 import { toast } from 'vue-sonner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -34,6 +35,47 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Loader2, Link2, Building2, Users, Upload, Trash2, ImagePlus, Pencil } from 'lucide-vue-next'
+
+const route = useRoute()
+const router = useRouter()
+
+// ══════════════════════════════════════
+// GOOGLE ADS CONNECTION (admin only)
+// ══════════════════════════════════════
+const googleAds = ref(null) // stays null for non-admins (403), which hides the card
+const connectingGoogle = ref(false)
+
+async function fetchGoogleAdsConnection() {
+  try {
+    const { data } = await api.get('/google-ads/connection')
+    googleAds.value = data.data
+  } catch (err) {
+    googleAds.value = null
+  }
+}
+
+async function connectGoogleAds() {
+  connectingGoogle.value = true
+  try {
+    const { data } = await api.get('/google-ads/connect')
+    window.location.href = data.url
+  } catch (err) {
+    toast.error('Failed to start Google Ads connection')
+    connectingGoogle.value = false
+  }
+}
+
+// Google redirects back to /settings?google_ads=connected|error after the consent screen
+function handleGoogleAdsReturn() {
+  const status = route.query.google_ads
+  if (!status) return
+  if (status === 'connected') {
+    toast.success('Google Ads connected')
+  } else {
+    toast.error('Google Ads connection failed', { description: route.query.reason })
+  }
+  router.replace({ query: {} })
+}
 
 // ══════════════════════════════════════
 // AD ACCOUNTS TAB
@@ -73,8 +115,8 @@ async function fetchAccounts() {
 
 async function handleAddAccount() {
   const f = accountForm
-  if (!f.platform || !f.account_name || !f.account_id || !f.access_token) {
-    toast.error('Please fill in all fields')
+  if (!f.platform || !f.account_name || !f.account_id) {
+    toast.error('Platform, name and ID are required')
     return
   }
   submittingAccount.value = true
@@ -314,6 +356,8 @@ async function handleDeleteUser(user) {
 }
 
 onMounted(() => {
+  handleGoogleAdsReturn()
+  fetchGoogleAdsConnection()
   fetchAccounts()
   fetchCompanySettings()
   fetchUsers()
@@ -351,6 +395,27 @@ onMounted(() => {
         <!-- TAB: Ad Accounts                -->
         <!-- ═══════════════════════════════ -->
         <TabsContent value="accounts" class="space-y-5">
+          <Card v-if="googleAds">
+            <CardHeader class="px-4 pt-4 pb-3">
+              <CardTitle class="font-display text-base font-semibold">Google Ads Connection</CardTitle>
+              <CardDescription class="text-sm">One Google login with MCC access reads reports for all Google Ads accounts.</CardDescription>
+            </CardHeader>
+            <CardContent class="px-4 pb-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="text-sm">
+                  <Badge :variant="googleAds.connected ? 'default' : 'secondary'" class="rounded-lg text-xs">
+                    {{ googleAds.connected ? 'Connected' : 'Not connected' }}
+                  </Badge>
+                  <span v-if="googleAds.email" class="ml-2 text-muted-foreground">{{ googleAds.email }}</span>
+                </div>
+                <Button :disabled="connectingGoogle" class="rounded-xl" @click="connectGoogleAds">
+                  <Loader2 v-if="connectingGoogle" class="mr-2 h-4 w-4 animate-spin" />
+                  {{ googleAds.connected ? 'Reconnect Google Ads' : 'Connect Google Ads' }}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader class="px-4 pt-4 pb-3">
               <CardTitle class="font-display text-base font-semibold">Connect Account</CardTitle>
@@ -378,8 +443,8 @@ onMounted(() => {
                     <Input v-model="accountForm.account_id" :placeholder="accountForm.platform === 'google' ? '123-456-7890' : 'act_123456789'" class="rounded-xl" />
                   </div>
                   <div class="space-y-2">
-                    <Label class="text-xs">{{ accountForm.platform === 'google' ? 'API Key / Refresh Token' : 'Access Token' }}</Label>
-                    <Input v-model="accountForm.access_token" type="password" placeholder="Paste token" class="rounded-xl" />
+                    <Label class="text-xs">Access Token (optional)</Label>
+                    <Input v-model="accountForm.access_token" type="password" placeholder="Leave empty to use the server token" class="rounded-xl" />
                   </div>
                 </div>
                 <div class="flex justify-end">

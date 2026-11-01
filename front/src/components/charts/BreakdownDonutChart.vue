@@ -73,6 +73,8 @@ const chartOptions = computed(() => ({
             text: label.length > 20 ? label.substring(0, 20) + '…' : label,
             fillStyle: data.datasets[0].backgroundColor[i],
             strokeStyle: 'transparent',
+            // Custom labels don't inherit labels.color; without this the text is black on the dark theme
+            fontColor: isDark.value ? '#999' : '#71717a',
             index: i,
             hidden: false,
           }))

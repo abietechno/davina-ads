@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AdsAnalyticsController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CompanySettingController;
 use App\Http\Controllers\Api\ExportController;
+use App\Http\Controllers\Api\GoogleAdsConnectionController;
 use App\Http\Controllers\Api\GoogleAuthController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\UserController;
@@ -17,6 +18,9 @@ Route::get('/company-settings', [CompanySettingController::class, 'show']);
 // Google OAuth
 Route::get('/auth/google/redirect', [GoogleAuthController::class, 'redirect']);
 Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback']);
+
+// Google Ads connection callback (browser redirect from Google; protected by the one-time OAuth state)
+Route::get('/auth/google-ads/callback', [GoogleAdsConnectionController::class, 'callback']);
 
 // Protected — any approved, logged-in user
 Route::middleware('auth:sanctum')->group(function () {
@@ -40,6 +44,10 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/client-ad-accounts', [AdAccountController::class, 'store']);
     Route::put('/client-ad-accounts/{clientAdAccount}', [AdAccountController::class, 'update']);
     Route::delete('/client-ad-accounts/{clientAdAccount}', [AdAccountController::class, 'destroy']);
+
+    Route::get('/google-ads/connection', [GoogleAdsConnectionController::class, 'show']);
+    Route::get('/google-ads/connect', [GoogleAdsConnectionController::class, 'redirect']);
+    Route::delete('/google-ads/connection', [GoogleAdsConnectionController::class, 'destroy']);
 
     Route::post('/company-settings', [CompanySettingController::class, 'update']);
 

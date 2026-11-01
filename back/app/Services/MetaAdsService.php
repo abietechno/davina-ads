@@ -4,22 +4,88 @@ namespace App\Services;
 
 use App\Models\ClientAdAccount;
 use App\Models\DailyAdMetric;
+use Carbon\Carbon;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
+/**
+ * Read-only Meta Marketing API client. Never call any endpoint that creates,
+ * edits, pauses or deletes campaigns, ads or budgets from here.
+ */
 class MetaAdsService
 {
-    private const BASE_URL = 'https://graph.facebook.com/v21.0';
+    /** Meta error codes that mean "throttled / temporary, try again later". */
+    private const RETRYABLE_ERROR_CODES = [1, 2, 4, 17, 32, 341, 613, 80000, 80003, 80004, 80014];
+
+    /**
+     * Wait (ms) before each retry: exponential backoff, max 3 retries. Kept short (13s total) so a sync
+     * started from the dashboard stays under PHP's 30s limit; longer waits belong to the queue job's backoff.
+     */
+    private const RETRY_DELAYS_MS = [1000, 3000, 9000];
+
+    private function baseUrl(): string
+    {
+        return 'https://graph.facebook.com/' . config('services.meta.api_version');
+    }
+
+    /**
+     * Token is sent as a Bearer header, never in the query string, so it can't leak into logs or paging URLs.
+     */
+    private function client(ClientAdAccount $account): PendingRequest
+    {
+        $token = config('services.meta.system_user_token') ?: $account->access_token;
+
+        if (! $token) {
+            throw new RuntimeException('META_SYSTEM_USER_TOKEN is not configured in .env.');
+        }
+
+        return Http::withToken($token)
+            ->acceptJson()
+            ->timeout(60)
+            ->retry(self::RETRY_DELAYS_MS, when: fn ($e) => $this->isRetryable($e), throw: false);
+    }
+
+    private function isRetryable(\Throwable $e): bool
+    {
+        if ($e instanceof ConnectionException) {
+            // SSL/certificate problems are server misconfiguration and won't fix themselves on retry
+            return ! str_contains($e->getMessage(), 'SSL');
+        }
+
+        if ($e instanceof RequestException) {
+            return $e->response->serverError()
+                || in_array((int) $e->response->json('error.code'), self::RETRYABLE_ERROR_CODES, true);
+        }
+
+        return false;
+    }
+
+    private function errorMessage(Response $response): string
+    {
+        $code = $response->json('error.code');
+        $message = $response->json('error.message', 'Unknown Meta API error');
+
+        return $code ? "Meta API error {$code}: {$message}" : $message;
+    }
 
     /**
      * Fields to request per level.
      */
     private function fieldsForLevel(string $level): string
     {
+        $metrics = 'spend,impressions,clicks,reach,actions,action_values';
+
         return match ($level) {
-            'campaign' => 'campaign_id,campaign_name,spend,impressions,clicks,reach',
-            'adset'    => 'campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,reach',
-            'ad'       => 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,reach',
+            'campaign' => "campaign_id,campaign_name,{$metrics}",
+            'adset'    => "campaign_id,campaign_name,adset_id,adset_name,{$metrics}",
+            'ad'       => "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,{$metrics}",
         };
     }
 
@@ -31,7 +97,8 @@ class MetaAdsService
         $base = [
             'client_ad_account_id' => $accountId,
             'level' => $level,
-            'date' => $row['date_start'],
+            // Carbon (not a plain string) so the lookup matches how the `date` cast stores it on every DB driver
+            'date' => Carbon::parse($row['date_start'])->startOfDay(),
         ];
 
         return match ($level) {
@@ -44,7 +111,7 @@ class MetaAdsService
     /**
      * Values to upsert per level.
      */
-    private function valuesForLevel(string $level, array $row): array
+    private function valuesForLevel(string $level, array $row, string $conversionType): array
     {
         $base = [
             'campaign_name' => $row['campaign_name'] ?? 'Unknown',
@@ -52,6 +119,8 @@ class MetaAdsService
             'impressions' => (int) ($row['impressions'] ?? 0),
             'clicks' => (int) ($row['clicks'] ?? 0),
             'reach' => (int) ($row['reach'] ?? 0),
+            'conversions' => $this->actionValue($row['actions'] ?? [], $conversionType),
+            'revenue' => $this->actionValue($row['action_values'] ?? [], $conversionType),
         ];
 
         if (in_array($level, ['adset', 'ad'])) {
@@ -66,62 +135,97 @@ class MetaAdsService
     }
 
     /**
-     * Sync insights from Meta Ads API.
+     * Pick the value of one action_type out of Meta's actions / action_values list (0 when absent).
+     */
+    private function actionValue(array $actions, string $actionType): float
+    {
+        foreach ($actions as $action) {
+            if (($action['action_type'] ?? null) === $actionType) {
+                return (float) ($action['value'] ?? 0);
+            }
+        }
+
+        return 0.0;
+    }
+
+    private function conversionType(ClientAdAccount $account): string
+    {
+        return $account->conversion_action_type ?: config('services.meta.default_conversion_action_type');
+    }
+
+    private function adAccountPath(ClientAdAccount $account): string
+    {
+        return 'act_' . preg_replace('/^act_/', '', $account->account_id);
+    }
+
+    /**
+     * Ad accounts the token can read (used to discover / verify accounts).
+     */
+    public function listAdAccounts(ClientAdAccount $account): array
+    {
+        $response = $this->client($account)->get($this->baseUrl() . '/me/adaccounts', [
+            'fields' => 'account_id,name,currency,timezone_name,account_status',
+            'limit' => 200,
+        ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException($this->errorMessage($response));
+        }
+
+        return $response->json('data', []);
+    }
+
+    /**
+     * Sync daily insights from Meta Ads API. Dates are in the ad account's own timezone.
      *
      * @param string $level  campaign|adset|ad
      */
     public function sync(ClientAdAccount $account, string $startDate, string $endDate, string $level = 'campaign'): array
     {
-        $token = $account->access_token;
-        $adAccountId = $account->account_id;
-
-        if (! str_starts_with($adAccountId, 'act_')) {
-            $adAccountId = 'act_' . $adAccountId;
-        }
-
+        $adAccountId = $this->adAccountPath($account);
+        $conversionType = $this->conversionType($account);
         $results = ['synced' => 0, 'errors' => []];
 
         try {
-            $response = Http::get(self::BASE_URL . "/{$adAccountId}/insights", [
-                'access_token' => $token,
+            $client = $this->client($account);
+
+            $response = $client->get($this->baseUrl() . "/{$adAccountId}/insights", [
                 'level' => $level,
                 'fields' => $this->fieldsForLevel($level),
-                'time_range' => json_encode([
-                    'since' => $startDate,
-                    'until' => $endDate,
-                ]),
+                'time_range' => json_encode(['since' => $startDate, 'until' => $endDate]),
                 'time_increment' => 1,
                 'limit' => 500,
             ]);
 
-            if ($response->failed()) {
-                $error = $response->json('error.message', 'Unknown Meta API error');
-                Log::error('Meta Ads API error', [
-                    'account_id' => $adAccountId,
-                    'level' => $level,
-                    'error' => $error,
-                ]);
-                $results['errors'][] = $error;
-                return $results;
+            $page = 1;
+
+            while (true) {
+                if ($response->failed()) {
+                    $error = $this->errorMessage($response);
+                    Log::error('Meta Ads API error', [
+                        'account_id' => $adAccountId,
+                        'level' => $level,
+                        'page' => $page,
+                        'status' => $response->status(),
+                        'error' => $error,
+                    ]);
+                    // A failed page means the data is incomplete: report it instead of silently stopping
+                    $results['errors'][] = $page > 1 ? "Page {$page}: {$error}" : $error;
+                    break;
+                }
+
+                $data = $response->json('data', []);
+                $this->logActionTypesOnce($account, $data);
+                $results['synced'] += $this->processPage($data, $account->id, $level, $conversionType);
+
+                $nextUrl = $response->json('paging.next');
+                if (! $nextUrl || empty($data)) {
+                    break;
+                }
+
+                $page++;
+                $response = $client->get($nextUrl);
             }
-
-            $results['synced'] += $this->processPage($response->json('data', []), $account->id, $level);
-
-            // Pagination
-            $nextUrl = $response->json('paging.next');
-            while ($nextUrl) {
-                $pageResponse = Http::get($nextUrl);
-                if ($pageResponse->failed()) break;
-
-                $pageData = $pageResponse->json('data', []);
-                if (empty($pageData)) break;
-
-                $results['synced'] += $this->processPage($pageData, $account->id, $level);
-                $nextUrl = $pageResponse->json('paging.next');
-            }
-
-            $account->update(['last_synced_at' => now()]);
-
         } catch (\Exception $e) {
             Log::error('Meta Ads sync exception', [
                 'account_id' => $adAccountId,
@@ -133,18 +237,33 @@ class MetaAdsService
         return $results;
     }
 
-    private function processPage(array $data, int $accountId, string $level): int
+    private function processPage(array $data, int $accountId, string $level, string $conversionType): int
     {
-        $count = 0;
+        return DB::transaction(function () use ($data, $accountId, $level, $conversionType) {
+            foreach ($data as $row) {
+                DailyAdMetric::updateOrCreate(
+                    $this->uniqueKeyForLevel($level, $accountId, $row),
+                    $this->valuesForLevel($level, $row, $conversionType),
+                );
+            }
 
-        foreach ($data as $row) {
-            DailyAdMetric::updateOrCreate(
-                $this->uniqueKeyForLevel($level, $accountId, $row),
-                $this->valuesForLevel($level, $row),
-            );
-            $count++;
+            return count($data);
+        });
+    }
+
+    /**
+     * Log the distinct action_types seen for an account once, so the right
+     * conversion_action_type (purchase, lead, messaging, ...) can be chosen per client.
+     */
+    private function logActionTypesOnce(ClientAdAccount $account, array $data): void
+    {
+        $types = collect($data)->pluck('actions')->flatten(1)->pluck('action_type')->filter()->unique()->sort()->values();
+
+        if ($types->isNotEmpty() && Cache::add("meta_action_types_logged:{$account->id}", true, now()->addDays(30))) {
+            Log::info('Meta action_types for account', [
+                'client_ad_account_id' => $account->id,
+                'action_types' => $types->all(),
+            ]);
         }
-
-        return $count;
     }
 }
