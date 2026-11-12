@@ -2,8 +2,10 @@
 
 namespace App\Services\Ads;
 
+use App\Models\AdGeoMetric;
 use App\Models\ClientAdAccount;
 use App\Models\DailyAdMetric;
+use App\Services\MetaAdsService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -13,6 +15,8 @@ use Illuminate\Support\Facades\DB;
  */
 class AdsReportService
 {
+    public function __construct(private GeoLocator $geo) {}
+
     public function dashboardStats(ClientAdAccount $account, string $level, string $startDate, string $endDate): array
     {
         $dateRange = [$startDate, $endDate];
@@ -91,11 +95,16 @@ class AdsReportService
 
         $lastRun = $account->syncRuns()->latest('id')->first();
 
+        $geo = $this->geoStats($account, $startDate, $endDate);
+        // Spend no location row accounts for: Google leaves some traffic unplaced, and older dates may predate the location sync
+        $geo['unmapped_spend'] = max(0, round($spend - $geo['domestic_spend'] - $geo['abroad_spend'], 2));
+
         return [
             'summary' => $summary,
             'daily' => $daily,
             'trend' => $trend,
             'breakdown' => $breakdown,
+            'geo' => $geo,
             'level' => $level,
             'account' => [
                 'platform' => $account->platform,
@@ -108,6 +117,51 @@ class AdsReportService
                 'last_sync_error' => $lastRun?->status === 'failed' ? $lastRun->error_message : null,
                 'last_sync_attempt_at' => $lastRun?->started_at?->toIso8601String(),
             ],
+        ];
+    }
+
+    /**
+     * Delivery per map point. Abroad is grouped per country; rows that can't be placed
+     * (unknown location, see GeoLocator) only count towards unmapped spend.
+     */
+    public function geoStats(ClientAdAccount $account, string $startDate, string $endDate): array
+    {
+        $rows = AdGeoMetric::where('client_ad_account_id', $account->id)
+            ->whereDate('date', '>=', $startDate)
+            ->whereDate('date', '<=', $endDate)
+            ->selectRaw('country_code, region, city, SUM(spend) as spend, SUM(impressions) as impressions, SUM(clicks) as clicks, SUM(conversions) as conversions')
+            ->groupBy('country_code', 'region', 'city')
+            ->get();
+
+        $points = [];
+
+        foreach ($rows as $row) {
+            $point = $this->geo->locate($row->country_code, $row->region, $row->city);
+            if (! $point) continue;
+
+            $points[$point['key']] ??= $point + ['spend' => 0.0, 'impressions' => 0, 'clicks' => 0, 'conversions' => 0.0];
+            $points[$point['key']]['spend'] += (float) $row->spend;
+            $points[$point['key']]['impressions'] += (int) $row->impressions;
+            $points[$point['key']]['clicks'] += (int) $row->clicks;
+            $points[$point['key']]['conversions'] += (float) $row->conversions;
+        }
+
+        $points = collect($points)
+            ->filter(fn (array $p) => $p['spend'] > 0 || $p['impressions'] > 0)
+            ->sortByDesc('spend')
+            ->values();
+
+        $abroad = $points->where('scope', 'abroad');
+        $conversionType = $account->conversion_action_type ?: config('services.meta.default_conversion_action_type');
+
+        return [
+            'points' => $points->all(),
+            'home_country' => GeoLocator::HOME_COUNTRY,
+            'domestic_spend' => round($points->where('scope', 'domestic')->sum('spend'), 2),
+            'abroad_spend' => round($abroad->sum('spend'), 2),
+            'abroad_conversions' => $abroad->sum('conversions'),
+            // Meta doesn't report every conversion action per region; the map then counts the closest one
+            'conversions_approximate' => $account->platform === 'meta' && isset(MetaAdsService::GEO_CONVERSION_FALLBACKS[$conversionType]),
         ];
     }
 

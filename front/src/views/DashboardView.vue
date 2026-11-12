@@ -57,6 +57,7 @@ import SpendTrendChart from '@/components/charts/SpendTrendChart.vue'
 import ImpressionsChart from '@/components/charts/ImpressionsChart.vue'
 import ClicksChart from '@/components/charts/ClicksChart.vue'
 import BreakdownDonutChart from '@/components/charts/BreakdownDonutChart.vue'
+import AdGeoMap from '@/components/charts/AdGeoMap.vue'
 import PlatformLogo from '@/components/PlatformLogo.vue'
 
 // ── State ────────────────────────────────────
@@ -93,6 +94,7 @@ const accountInfo = ref(null)
 const dailyMetrics = ref([])
 const trendData = ref([])
 const breakdownData = ref([])
+const geoData = ref(null)
 
 // ── Add Account form ─────────────────────────
 const accountForm = reactive({
@@ -170,6 +172,7 @@ async function fetchStats() {
     dailyMetrics.value = data.data.daily
     trendData.value = data.data.trend || []
     breakdownData.value = data.data.breakdown || []
+    geoData.value = data.data.geo || null
   } catch (err) {
     if (err.response?.status === 422) {
       const errors = err.response.data.errors
@@ -730,6 +733,18 @@ function formatLastSynced(v) {
               <p v-else class="font-display text-xl font-bold sm:text-2xl" :class="roasClass(stats.roas)">
                 {{ stats.roas }}x
               </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <!-- Ad delivery map -->
+        <div v-if="geoData?.points?.length" class="mt-5">
+          <Card>
+            <CardHeader class="px-4 pt-4 pb-2">
+              <CardTitle class="text-xs font-medium text-muted-foreground">Sebaran Iklan</CardTitle>
+            </CardHeader>
+            <CardContent class="px-4 pb-4">
+              <AdGeoMap :geo="geoData" :platform="selectedPlatform()" :conversion-label="isMessagingAccount() ? 'WA' : 'Konversi'" />
             </CardContent>
           </Card>
         </div>

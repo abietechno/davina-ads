@@ -116,7 +116,7 @@ class GoogleSyncTest extends TestCase
         app(AdSyncService::class)->sync($account, '2026-10-25', '2026-10-25');
 
         $this->assertSame(1, DailyAdMetric::count());
-        Http::assertSentCount(4); // 1 token + 1 customer lookup + 2 searchStream
+        Http::assertSentCount(6); // 1 token + 1 customer lookup + 2 searchStream + 2 location searchStream
     }
 
     public function test_cloud_project_access_error_is_reported_with_a_hint(): void

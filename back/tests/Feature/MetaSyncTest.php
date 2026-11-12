@@ -113,13 +113,14 @@ class MetaSyncTest extends TestCase
         Http::fake([
             self::INSIGHTS_URL => Http::sequence()
                 ->push(['error' => ['code' => 17, 'message' => 'User request limit reached']], 400)
-                ->push(['data' => [$this->row('2026-10-25', '1')]]),
+                ->push(['data' => [$this->row('2026-10-25', '1')]])
+                ->push(['data' => []]), // location breakdown
         ]);
 
         $result = app(AdSyncService::class)->sync($this->account(), '2026-10-25', '2026-10-25');
 
         $this->assertSame(['synced' => 1, 'errors' => []], $result);
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
         Sleep::assertSleptTimes(1);
     }
 

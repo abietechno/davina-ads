@@ -254,6 +254,93 @@ class GoogleAdsService
         return $results;
     }
 
+    /**
+     * Daily account delivery per audience physical location (user_location_view, so not
+     * "area of interest"). Google leaves part of the spend without any location.
+     *
+     * @return list<array{date: string, country_code: ?string, region: ?string, city: ?string, spend: float, impressions: int, clicks: int, conversions: float}>
+     */
+    public function fetchGeo(ClientAdAccount $account, string $startDate, string $endDate): array
+    {
+        $client = $this->client($account);
+        $from = Carbon::parse($startDate)->toDateString();
+        $to = Carbon::parse($endDate)->toDateString();
+
+        $rows = $this->search($client, $account->account_id,
+            'SELECT user_location_view.country_criterion_id, segments.geo_target_most_specific_location, segments.date, '
+            . 'metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions '
+            . "FROM user_location_view WHERE segments.date BETWEEN '{$from}' AND '{$to}'"
+        );
+
+        // Most specific location when Google knows it, otherwise at least the country
+        $locationOf = fn (array $row) => $row['segments']['geoTargetMostSpecificLocation']
+            ?? (isset($row['userLocationView']['countryCriterionId']) ? 'geoTargetConstants/' . $row['userLocationView']['countryCriterionId'] : null);
+
+        $places = $this->geoTargets($client, $account->account_id, collect($rows)->map($locationOf)->filter()->unique()->values()->all());
+
+        return collect($rows)->map(function (array $row) use ($locationOf, $places) {
+            $place = $places[$locationOf($row)] ?? [];
+
+            return [
+                'date' => $row['segments']['date'],
+                'country_code' => $place['country_code'] ?? null,
+                'region' => $place['region'] ?? null,
+                'city' => $place['city'] ?? null,
+                'spend' => ((int) ($row['metrics']['costMicros'] ?? 0)) / 1_000_000,
+                'impressions' => (int) ($row['metrics']['impressions'] ?? 0),
+                'clicks' => (int) ($row['metrics']['clicks'] ?? 0),
+                'conversions' => (float) ($row['metrics']['conversions'] ?? 0),
+            ];
+        })->all();
+    }
+
+    /**
+     * geo_target_constant resource name => country code, region and city, parsed from its canonical
+     * name ("Kuta,Kuta,Bali,Indonesia": most specific first, country last). Cached forever: a
+     * constant's ID never changes meaning.
+     *
+     * @param  list<string>  $resourceNames
+     * @return array<string, array{country_code: ?string, region: ?string, city: ?string}>
+     */
+    private function geoTargets(PendingRequest $client, string $customerId, array $resourceNames): array
+    {
+        $places = [];
+        $missing = [];
+
+        foreach ($resourceNames as $name) {
+            // Only API-shaped names reach the GAQL string below
+            if (! preg_match('#^geoTargetConstants/\d+$#', $name)) continue;
+
+            $cached = Cache::get("google_geo_target:{$name}");
+            $cached ? $places[$name] = $cached : $missing[] = $name;
+        }
+
+        foreach (array_chunk($missing, 500) as $chunk) {
+            $in = implode(',', array_map(fn ($name) => "'{$name}'", $chunk));
+            $rows = $this->search($client, $customerId,
+                'SELECT geo_target_constant.resource_name, geo_target_constant.canonical_name, geo_target_constant.country_code '
+                . "FROM geo_target_constant WHERE geo_target_constant.resource_name IN ({$in})"
+            );
+
+            foreach ($rows as $row) {
+                $target = $row['geoTargetConstant'];
+                $parts = array_map('trim', explode(',', $target['canonicalName'] ?? ''));
+                $count = count($parts);
+
+                $place = [
+                    'country_code' => $target['countryCode'] ?? null,
+                    'region' => $count >= 2 ? $parts[$count - 2] : null,
+                    'city' => $count >= 3 ? $parts[0] : null,
+                ];
+
+                Cache::forever("google_geo_target:{$target['resourceName']}", $place);
+                $places[$target['resourceName']] = $place;
+            }
+        }
+
+        return $places;
+    }
+
     private function storeRows(array $rows, int $accountId, string $level): int
     {
         $count = 0;

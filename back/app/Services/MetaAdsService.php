@@ -30,6 +30,14 @@ class MetaAdsService
      */
     private const RETRY_DELAYS_MS = [1000, 3000, 9000];
 
+    /**
+     * Conversion actions Meta leaves out of region-broken-down insights => the closest action it does return there
+     * (30d Davina: 51 conversations started vs 52 messaging connections).
+     */
+    public const GEO_CONVERSION_FALLBACKS = [
+        'onsite_conversion.messaging_conversation_started_7d' => 'onsite_conversion.total_messaging_connection',
+    ];
+
     private function baseUrl(): string
     {
         return 'https://graph.facebook.com/' . config('services.meta.api_version');
@@ -235,6 +243,59 @@ class MetaAdsService
         }
 
         return $results;
+    }
+
+    /**
+     * Daily account delivery per audience location. Meta breaks down no deeper than region (province).
+     *
+     * @return list<array{date: string, country_code: ?string, region: ?string, city: null, spend: float, impressions: int, clicks: int, conversions: float}>
+     */
+    public function fetchGeo(ClientAdAccount $account, string $startDate, string $endDate): array
+    {
+        $conversionType = $this->conversionType($account);
+        $conversionType = self::GEO_CONVERSION_FALLBACKS[$conversionType] ?? $conversionType;
+        $client = $this->client($account);
+
+        $response = $client->get($this->baseUrl() . '/' . $this->adAccountPath($account) . '/insights', [
+            'level' => 'account',
+            'breakdowns' => 'country,region',
+            'fields' => 'spend,impressions,clicks,actions',
+            'time_range' => json_encode(['since' => $startDate, 'until' => $endDate]),
+            'time_increment' => 1,
+            'limit' => 500,
+        ]);
+
+        $rows = [];
+
+        while (true) {
+            if ($response->failed()) {
+                throw new RuntimeException($this->errorMessage($response));
+            }
+
+            $data = $response->json('data', []);
+            foreach ($data as $row) {
+                $country = strtoupper((string) ($row['country'] ?? ''));
+                $region = $row['region'] ?? null;
+
+                $rows[] = [
+                    'date' => Carbon::parse($row['date_start'])->toDateString(),
+                    'country_code' => preg_match('/^[A-Z]{2}$/', $country) ? $country : null,
+                    'region' => $region && strcasecmp($region, 'Unknown') !== 0 ? $region : null,
+                    'city' => null,
+                    'spend' => (float) ($row['spend'] ?? 0),
+                    'impressions' => (int) ($row['impressions'] ?? 0),
+                    'clicks' => (int) ($row['clicks'] ?? 0),
+                    'conversions' => $this->actionValue($row['actions'] ?? [], $conversionType),
+                ];
+            }
+
+            $nextUrl = $response->json('paging.next');
+            if (! $nextUrl || empty($data)) {
+                return $rows;
+            }
+
+            $response = $client->get($nextUrl);
+        }
     }
 
     private function processPage(array $data, int $accountId, string $level, string $conversionType): int
