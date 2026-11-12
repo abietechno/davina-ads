@@ -16,11 +16,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -39,7 +34,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import {
-  CalendarDays,
   DollarSign,
   Eye,
   MousePointerClick,
@@ -58,6 +52,7 @@ import ImpressionsChart from '@/components/charts/ImpressionsChart.vue'
 import ClicksChart from '@/components/charts/ClicksChart.vue'
 import BreakdownDonutChart from '@/components/charts/BreakdownDonutChart.vue'
 import AdGeoMap from '@/components/charts/AdGeoMap.vue'
+import DateRangePicker from '@/components/DateRangePicker.vue'
 import PlatformLogo from '@/components/PlatformLogo.vue'
 
 // ── State ────────────────────────────────────
@@ -116,12 +111,6 @@ function toLocalDate(d) {
 function daysAgo(n) {
   const d = new Date()
   d.setDate(d.getDate() - n)
-  return toLocalDate(d)
-}
-
-function getMonthStartDate() {
-  const d = new Date()
-  d.setDate(1)
   return toLocalDate(d)
 }
 
@@ -542,55 +531,7 @@ function formatLastSynced(v) {
           </div>
 
           <!-- Date Range -->
-          <Popover>
-            <PopoverTrigger as-child>
-              <Button variant="outline" class="w-full justify-start gap-2 rounded-xl font-normal sm:w-auto">
-                <CalendarDays class="h-4 w-4 text-muted-foreground" />
-                <span class="text-sm">{{ startDate }} &mdash; {{ endDate }}</span>
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent class="w-auto rounded-2xl p-4" align="start">
-              <div class="space-y-4">
-                <p class="text-sm font-medium font-display">Date Range</p>
-                <div class="grid gap-3">
-                  <div class="space-y-1.5">
-                    <Label class="text-xs">From</Label>
-                    <Input type="date" v-model="startDate" class="rounded-xl" />
-                  </div>
-                  <div class="space-y-1.5">
-                    <Label class="text-xs">To</Label>
-                    <Input type="date" v-model="endDate" class="rounded-xl" />
-                  </div>
-                </div>
-                <div class="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="flex-1 rounded-xl"
-                    @click="startDate = getMonthStartDate(); endDate = getDefaultEndDate()"
-                  >
-                    This Month
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="flex-1 rounded-xl"
-                    @click="startDate = daysAgo(6); endDate = getDefaultEndDate()"
-                  >
-                    Last 7 Days
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="flex-1 rounded-xl"
-                    @click="startDate = daysAgo(29); endDate = getDefaultEndDate()"
-                  >
-                    Last 30 Days
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          <DateRangePicker v-model:start="startDate" v-model:end="endDate" />
         </div>
       </div>
     </div>
