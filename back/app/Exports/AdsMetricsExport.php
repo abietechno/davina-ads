@@ -2,15 +2,22 @@
 
 namespace App\Exports;
 
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdsMetricsExport
 {
+    private const MONEY = '"Rp "#,##0';
+    private const INTEGER = '#,##0';
+    private const PERCENT = '0.00%';
+
     private array $data;
 
     public function __construct(array $data)
@@ -21,137 +28,15 @@ class AdsMetricsExport
     public function download(string $filename): StreamedResponse
     {
         $spreadsheet = new Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Ads Report');
 
-        $data = $this->data;
+        $summarySheet = $spreadsheet->getActiveSheet();
+        $summarySheet->setTitle('Ringkasan');
+        $this->writeSummary($summarySheet);
 
-        // ── Header info ──
-        $companyName = $data['company']->company_name ?? 'Ads Analytics';
-        $accountName = $data['account']->account_name;
-        $platform = ucfirst($data['account']->platform);
-        $level = ucfirst($data['level']);
-        $period = "{$data['start_date']} s/d {$data['end_date']}";
+        $dailySheet = $spreadsheet->createSheet();
+        $dailySheet->setTitle('Harian');
+        $this->writeDaily($dailySheet);
 
-        $sheet->setCellValue('A1', $companyName);
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
-
-        $sheet->setCellValue('A2', "Laporan Performa Iklan — {$platform} Ads");
-        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(11);
-
-        $sheet->setCellValue('A3', "Akun: {$accountName} | Level: {$level} | Periode: {$period}");
-        $sheet->getStyle('A3')->getFont()->setSize(9)->setItalic(true);
-
-        // ── Summary ──
-        $summary = $data['summary'];
-        $sheet->setCellValue('A5', 'RINGKASAN');
-        $sheet->getStyle('A5')->getFont()->setBold(true)->setSize(10);
-
-        $sheet->setCellValue('A6', 'Total Spend');
-        $sheet->setCellValue('B6', $summary['total_spend']);
-        $sheet->getStyle('B6')->getNumberFormat()->setFormatCode('#,##0');
-
-        $sheet->setCellValue('C6', 'Impressions');
-        $sheet->setCellValue('D6', $summary['total_impressions']);
-        $sheet->getStyle('D6')->getNumberFormat()->setFormatCode('#,##0');
-
-        $sheet->setCellValue('E6', 'Clicks');
-        $sheet->setCellValue('F6', $summary['total_clicks']);
-        $sheet->getStyle('F6')->getNumberFormat()->setFormatCode('#,##0');
-
-        $sheet->setCellValue('G6', 'CTR');
-        $sheet->setCellValue('H6', $summary['ctr'] . '%');
-
-        // ── Table headings ──
-        $headerRow = 8;
-        $col = 'A';
-
-        $headings = ['Tanggal', 'Campaign'];
-        if (in_array($data['level'], ['adset', 'ad'])) {
-            $headings[] = 'Ad Set';
-        }
-        if ($data['level'] === 'ad') {
-            $headings[] = 'Ad';
-        }
-        $headings = array_merge($headings, ['Spend', 'Impressions', 'Clicks', 'Reach', 'CTR (%)']);
-
-        foreach ($headings as $heading) {
-            $sheet->setCellValue($col . $headerRow, $heading);
-            $col++;
-        }
-
-        $lastCol = chr(ord('A') + count($headings) - 1);
-
-        // Style header row
-        $sheet->getStyle("A{$headerRow}:{$lastCol}{$headerRow}")->applyFromArray([
-            'font' => ['bold' => true, 'color' => ['argb' => 'FFFFFFFF'], 'size' => 9],
-            'fill' => [
-                'fillType' => Fill::FILL_SOLID,
-                'startColor' => ['argb' => 'FF1F2937'],
-            ],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-
-        // ── Data rows ──
-        $rowNum = $headerRow + 1;
-        foreach ($data['rows'] as $row) {
-            $col = 'A';
-
-            $dateVal = $row->date instanceof \Carbon\Carbon ? $row->date->format('Y-m-d') : ($row->date ?? '');
-            $sheet->setCellValue($col++ . $rowNum, $dateVal);
-            $sheet->setCellValue($col++ . $rowNum, $row->campaign_name ?? '—');
-
-            if (in_array($data['level'], ['adset', 'ad'])) {
-                $sheet->setCellValue($col++ . $rowNum, $row->adset_name ?? '—');
-            }
-            if ($data['level'] === 'ad') {
-                $sheet->setCellValue($col++ . $rowNum, $row->ad_name ?? '—');
-            }
-
-            $impressions = (int) $row->impressions;
-            $clicks = (int) $row->clicks;
-            $ctr = $impressions > 0 ? round(($clicks / $impressions) * 100, 2) : 0;
-
-            $sheet->setCellValue($col++ . $rowNum, (float) $row->spend);
-            $sheet->setCellValue($col++ . $rowNum, $impressions);
-            $sheet->setCellValue($col++ . $rowNum, $clicks);
-            $sheet->setCellValue($col++ . $rowNum, (int) $row->reach);
-            $sheet->setCellValue($col++ . $rowNum, $ctr);
-
-            $rowNum++;
-        }
-
-        // Borders for data area
-        $lastDataRow = $rowNum - 1;
-        if ($lastDataRow >= $headerRow) {
-            $sheet->getStyle("A{$headerRow}:{$lastCol}{$lastDataRow}")->applyFromArray([
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['argb' => 'FFD1D5DB'],
-                    ],
-                ],
-            ]);
-        }
-
-        // Alternate row colors
-        for ($r = $headerRow + 1; $r <= $lastDataRow; $r++) {
-            if (($r - $headerRow) % 2 === 0) {
-                $sheet->getStyle("A{$r}:{$lastCol}{$r}")->applyFromArray([
-                    'fill' => [
-                        'fillType' => Fill::FILL_SOLID,
-                        'startColor' => ['argb' => 'FFF9FAFB'],
-                    ],
-                ]);
-            }
-        }
-
-        // Auto-size columns
-        foreach (range('A', $lastCol) as $colLetter) {
-            $sheet->getColumnDimension($colLetter)->setAutoSize(true);
-        }
-
-        // ── Write response ──
         $writer = new Xlsx($spreadsheet);
 
         return new StreamedResponse(function () use ($writer) {
@@ -161,5 +46,175 @@ class AdsMetricsExport
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
             'Cache-Control' => 'max-age=0',
         ]);
+    }
+
+    private function writeSummary(Worksheet $sheet): void
+    {
+        $data = $this->data;
+        $summary = $data['summary'];
+
+        $sheet->setCellValue('A1', $data['company']->company_name ?? 'Ads Analytics');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+
+        $sheet->setCellValue('A2', "Laporan Performa {$data['platform_label']}");
+        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(11);
+
+        $sheet->setCellValue('A3', "Akun: {$data['account']->account_name} | Level: {$data['level_label']} | Periode: {$data['period_label']}");
+        $sheet->getStyle('A3')->getFont()->setSize(9);
+
+        $kpis = [
+            [$data['conversion_label'], $summary['total_conversions'], null],
+            [$data['cost_per_conversion_label'], $summary['cost_per_conversion'], self::MONEY],
+            ['Total spend', $summary['total_spend'], self::MONEY],
+            ['Klik', $summary['total_clicks'], self::INTEGER],
+            ['CTR', $summary['ctr'] / 100, self::PERCENT],
+            ['Biaya per klik', $summary['cpc'], self::MONEY],
+            ['Impresi', $summary['total_impressions'], self::INTEGER],
+        ];
+
+        $row = 5;
+        foreach ($kpis as [$label, $value, $format]) {
+            $sheet->setCellValue("A{$row}", $label);
+            $sheet->setCellValue("B{$row}", $value);
+            if ($format) {
+                $sheet->getStyle("B{$row}")->getNumberFormat()->setFormatCode($format);
+            }
+            $row++;
+        }
+        $sheet->getStyle('B5:B7')->getFont()->setBold(true);
+
+        $row++;
+        $sheet->setCellValue("A{$row}", "Total per " . strtolower($data['level_label']));
+        $sheet->getStyle("A{$row}")->getFont()->setBold(true);
+
+        $rows = $data['totals']->map(fn ($total) => [
+            $total->name ?: '-',
+            (float) $total->spend,
+            (float) $total->conversions,
+            $total->conversions > 0 ? $total->spend / $total->conversions : null,
+            (int) $total->clicks,
+            $total->impressions > 0 ? $total->clicks / $total->impressions : null,
+            (int) $total->impressions,
+        ])->all();
+
+        $this->writeTable(
+            $sheet,
+            $row + 1,
+            [$data['level_label'], 'Spend', $data['conversion_label'], $data['cost_per_conversion_label'], 'Klik', 'CTR', 'Impresi'],
+            [null, self::MONEY, null, self::MONEY, self::INTEGER, self::PERCENT, self::INTEGER],
+            $rows,
+        );
+
+        $footerRow = $row + count($rows) + 3;
+        if ($data['synced_at']) {
+            $sheet->setCellValue("A{$footerRow}", "Data terakhir disinkronkan dari {$data['platform_label']}: {$data['synced_at']}");
+            $footerRow++;
+        }
+        $sheet->setCellValue("A{$footerRow}", "Laporan dibuat {$data['generated_at']}");
+        $sheet->getStyle("A" . ($footerRow - 1) . ":A{$footerRow}")->getFont()->setSize(9);
+
+        // Merged cells are left out of auto-size, so long title lines don't stretch column A
+        foreach ([1, 2, 3, $footerRow - 1, $footerRow] as $line) {
+            $sheet->mergeCells("A{$line}:G{$line}");
+        }
+    }
+
+    private function writeDaily(Worksheet $sheet): void
+    {
+        $data = $this->data;
+        $level = $data['level'];
+
+        $headings = ['Tanggal', 'Campaign'];
+        $formats = ['yyyy-mm-dd', null];
+        if (in_array($level, ['adset', 'ad'])) {
+            $headings[] = 'Ad set';
+            $formats[] = null;
+        }
+        if ($level === 'ad') {
+            $headings[] = 'Ad';
+            $formats[] = null;
+        }
+        $headings = array_merge($headings, ['Spend', $data['conversion_label'], $data['cost_per_conversion_label'], 'Klik', 'CTR', 'Impresi']);
+        $formats = array_merge($formats, [self::MONEY, null, self::MONEY, self::INTEGER, self::PERCENT, self::INTEGER]);
+        if ($data['show_reach']) {
+            $headings[] = 'Reach';
+            $formats[] = self::INTEGER;
+        }
+
+        $rows = $data['rows']->map(function ($row) use ($level, $data) {
+            $date = Date::PHPToExcel(new \DateTime(substr((string) $row->date, 0, 10)));
+            $cells = [$date, $row->campaign_name ?: '-'];
+            if (in_array($level, ['adset', 'ad'])) {
+                $cells[] = $row->adset_name ?: '-';
+            }
+            if ($level === 'ad') {
+                $cells[] = $row->ad_name ?: '-';
+            }
+
+            $cells = array_merge($cells, [
+                (float) $row->spend,
+                (float) $row->conversions,
+                $row->conversions > 0 ? $row->spend / $row->conversions : null,
+                (int) $row->clicks,
+                $row->impressions > 0 ? $row->clicks / $row->impressions : null,
+                (int) $row->impressions,
+            ]);
+            if ($data['show_reach']) {
+                $cells[] = (int) $row->reach;
+            }
+
+            return $cells;
+        })->all();
+
+        $this->writeTable($sheet, 1, $headings, $formats, $rows);
+        $sheet->freezePane('A2');
+    }
+
+    private function writeTable(Worksheet $sheet, int $headerRow, array $headings, array $formats, array $rows): void
+    {
+        $lastCol = Coordinate::stringFromColumnIndex(count($headings));
+
+        $sheet->fromArray($headings, null, "A{$headerRow}");
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$headerRow}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['argb' => 'FFFFFFFF'], 'size' => 9],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['argb' => 'FF1F2937'],
+            ],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        if ($rows) {
+            // strictNullComparison keeps real zeros instead of blanking them
+            $sheet->fromArray($rows, null, 'A' . ($headerRow + 1), true);
+        }
+
+        $lastDataRow = $headerRow + count($rows);
+
+        foreach ($formats as $index => $format) {
+            if ($format && $rows) {
+                $col = Coordinate::stringFromColumnIndex($index + 1);
+                $sheet->getStyle("{$col}" . ($headerRow + 1) . ":{$col}{$lastDataRow}")->getNumberFormat()->setFormatCode($format);
+            }
+        }
+
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$lastDataRow}")->applyFromArray([
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['argb' => 'FFD1D5DB'],
+                ],
+            ],
+        ]);
+
+        for ($r = $headerRow + 2; $r <= $lastDataRow; $r += 2) {
+            $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getFill()
+                ->setFillType(Fill::FILL_SOLID)
+                ->getStartColor()->setARGB('FFF9FAFB');
+        }
+
+        foreach (range(1, count($headings)) as $index) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($index))->setAutoSize(true);
+        }
     }
 }

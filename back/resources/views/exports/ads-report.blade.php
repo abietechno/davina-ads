@@ -2,13 +2,14 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>Laporan Performa Iklan</title>
+    <title>Laporan Performa {{ $platform_label }}</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+        /* DejaVu Sans ships with dompdf and only has normal and bold; other weights fall back to a serif */
         body {
             font-family: 'DejaVu Sans', Arial, sans-serif;
             font-size: 10px;
@@ -18,55 +19,56 @@
         .header {
             border-bottom: 2px solid #3b82f6;
             padding-bottom: 12px;
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
         .header h1 {
             font-size: 18px;
-            color: #1f2937;
             margin-bottom: 2px;
         }
         .header h2 {
             font-size: 13px;
-            color: #3b82f6;
-            font-weight: 600;
+            font-weight: bold;
+            color: #1d4ed8;
             margin-bottom: 4px;
         }
-        .header .meta {
+        .meta {
             font-size: 10px;
             color: #6b7280;
         }
-        .summary {
-            display: table;
+        .kpi {
             width: 100%;
-            margin-bottom: 20px;
+            border-collapse: collapse;
+            margin-bottom: 8px;
         }
-        .summary-card {
-            display: table-cell;
-            width: 25%;
-            padding: 10px 12px;
+        .kpi td {
+            width: 33.33%;
+            padding: 10px 14px;
             background: #f9fafb;
             border: 1px solid #e5e7eb;
-            text-align: center;
         }
-        .summary-card .label {
-            font-size: 9px;
+        .kpi .label {
+            font-size: 10px;
             color: #6b7280;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
-        .summary-card .value {
-            font-size: 14px;
-            font-weight: 700;
+        .kpi .value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #111827;
+        }
+        .secondary {
+            font-size: 10px;
+            color: #374151;
+            margin-bottom: 20px;
+        }
+        .secondary strong {
             color: #111827;
         }
         .section-title {
-            font-size: 11px;
-            font-weight: 700;
-            color: #374151;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #111827;
+            margin-bottom: 6px;
         }
         table.data-table {
             width: 100%;
@@ -76,134 +78,171 @@
         table.data-table thead th {
             background: #1f2937;
             color: #ffffff;
-            padding: 8px 6px;
+            padding: 7px 6px;
             text-align: left;
             font-size: 9px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-        }
-        table.data-table thead th.text-right {
-            text-align: right;
+            font-weight: bold;
         }
         table.data-table tbody td {
             padding: 6px;
             border-bottom: 1px solid #e5e7eb;
             font-size: 9px;
         }
-        table.data-table tbody td.text-right {
+        table.data-table .num {
             text-align: right;
+            white-space: nowrap;
         }
         table.data-table tbody tr:nth-child(even) {
             background: #f9fafb;
         }
+        .empty {
+            text-align: center;
+            padding: 20px;
+            color: #6b7280;
+        }
         .footer {
-            margin-top: 30px;
+            margin-top: 24px;
             padding-top: 10px;
             border-top: 1px solid #e5e7eb;
             font-size: 8px;
-            color: #9ca3af;
+            color: #6b7280;
             text-align: center;
-        }
-        .badge {
-            display: inline-block;
-            padding: 2px 6px;
-            background: #dbeafe;
-            color: #1d4ed8;
-            border-radius: 4px;
-            font-size: 8px;
-            font-weight: 600;
         }
     </style>
 </head>
 <body>
-    {{-- HEADER --}}
+    @php
+        $rp = fn ($v) => $v === null ? '-' : 'Rp ' . number_format($v, 0, ',', '.');
+        $num = fn ($v) => number_format((float) $v, 0, ',', '.');
+        // Google can report fractional conversions under data-driven attribution
+        $conv = fn ($v) => number_format((float) $v, fmod((float) $v, 1) == 0 ? 0 : 1, ',', '.');
+        $ctr = fn ($clicks, $impressions) => $impressions > 0 ? number_format($clicks / $impressions * 100, 2, ',', '.') . '%' : '-';
+        $perConv = fn ($spend, $conversions) => $conversions > 0 ? $rp($spend / $conversions) : '-';
+        $detailColumns = 8 + ($show_reach ? 1 : 0) + (in_array($level, ['adset', 'ad']) ? 1 : 0) + ($level === 'ad' ? 1 : 0);
+    @endphp
+
     <div class="header">
         <h1>{{ $company->company_name ?? 'Ads Analytics' }}</h1>
-        <h2>Laporan Performa Iklan — {{ ucfirst($account->platform) }} Ads</h2>
+        <h2>Laporan Performa {{ $platform_label }}</h2>
         <div class="meta">
             Akun: <strong>{{ $account->account_name }}</strong> |
-            Level: <strong>{{ ucfirst($level) }}</strong> |
-            Periode: <strong>{{ $start_date }} s/d {{ $end_date }}</strong> |
-            Digenerate: {{ now()->format('d M Y H:i') }}
+            Level: <strong>{{ $level_label }}</strong> |
+            Periode: <strong>{{ $period_label }}</strong>
         </div>
     </div>
 
-    {{-- SUMMARY --}}
-    <div class="summary">
-        <div class="summary-card">
-            <div class="label">Total Spend</div>
-            <div class="value">Rp {{ number_format($summary['total_spend'], 0, ',', '.') }}</div>
-        </div>
-        <div class="summary-card">
-            <div class="label">Impressions</div>
-            <div class="value">{{ number_format($summary['total_impressions'], 0, ',', '.') }}</div>
-        </div>
-        <div class="summary-card">
-            <div class="label">Clicks</div>
-            <div class="value">{{ number_format($summary['total_clicks'], 0, ',', '.') }}</div>
-        </div>
-        <div class="summary-card">
-            <div class="label">CTR</div>
-            <div class="value">{{ $summary['ctr'] }}%</div>
-        </div>
+    <table class="kpi">
+        <tr>
+            <td>
+                <div class="label">{{ $conversion_label }}</div>
+                <div class="value">{{ $conv($summary['total_conversions']) }}</div>
+            </td>
+            <td>
+                <div class="label">{{ $cost_per_conversion_label }}</div>
+                <div class="value">{{ $rp($summary['cost_per_conversion']) }}</div>
+            </td>
+            <td>
+                <div class="label">Total spend</div>
+                <div class="value">{{ $rp($summary['total_spend']) }}</div>
+            </td>
+        </tr>
+    </table>
+    <div class="secondary">
+        Klik: <strong>{{ $num($summary['total_clicks']) }}</strong> |
+        CTR: <strong>{{ $ctr($summary['total_clicks'], $summary['total_impressions']) }}</strong> |
+        Biaya per klik: <strong>{{ $rp($summary['cpc']) }}</strong> |
+        Impresi: <strong>{{ $num($summary['total_impressions']) }}</strong>
     </div>
 
-    {{-- DETAIL TABLE --}}
-    <div class="section-title">Detail per {{ ucfirst($level) }}</div>
+    <div class="section-title">Total per {{ strtolower($level_label) }}</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 34%;">{{ $level_label }}</th>
+                <th class="num">Spend</th>
+                <th class="num">{{ $conversion_label }}</th>
+                <th class="num">{{ $cost_per_conversion_label }}</th>
+                <th class="num">Klik</th>
+                <th class="num">CTR</th>
+                <th class="num">Impresi</th>
+            </tr>
+        </thead>
+        <tbody>
+            @forelse($totals as $total)
+                <tr>
+                    <td>{{ $total->name ?: '-' }}</td>
+                    <td class="num">{{ $rp($total->spend) }}</td>
+                    <td class="num">{{ $conv($total->conversions) }}</td>
+                    <td class="num">{{ $perConv($total->spend, $total->conversions) }}</td>
+                    <td class="num">{{ $num($total->clicks) }}</td>
+                    <td class="num">{{ $ctr($total->clicks, $total->impressions) }}</td>
+                    <td class="num">{{ $num($total->impressions) }}</td>
+                </tr>
+            @empty
+                <tr>
+                    <td colspan="7" class="empty">Tidak ada iklan yang tayang di periode ini.</td>
+                </tr>
+            @endforelse
+        </tbody>
+    </table>
 
+    <div class="section-title">Rincian harian</div>
     <table class="data-table">
         <thead>
             <tr>
                 <th>Tanggal</th>
                 <th>Campaign</th>
                 @if(in_array($level, ['adset', 'ad']))
-                    <th>Ad Set</th>
+                    <th>Ad set</th>
                 @endif
                 @if($level === 'ad')
                     <th>Ad</th>
                 @endif
-                <th class="text-right">Spend</th>
-                <th class="text-right">Impr.</th>
-                <th class="text-right">Clicks</th>
-                <th class="text-right">Reach</th>
-                <th class="text-right">CTR</th>
+                <th class="num">Spend</th>
+                <th class="num">{{ $conversion_label }}</th>
+                <th class="num">{{ $cost_per_conversion_label }}</th>
+                <th class="num">Klik</th>
+                <th class="num">CTR</th>
+                <th class="num">Impresi</th>
+                @if($show_reach)
+                    <th class="num">Reach</th>
+                @endif
             </tr>
         </thead>
         <tbody>
             @forelse($rows as $row)
                 <tr>
-                    <td>{{ $row->date instanceof \Carbon\Carbon ? $row->date->format('Y-m-d') : $row->date }}</td>
-                    <td>{{ $row->campaign_name ?? '—' }}</td>
+                    <td style="white-space: nowrap;">{{ \Illuminate\Support\Carbon::parse($row->date)->locale('id')->translatedFormat('j M Y') }}</td>
+                    <td>{{ $row->campaign_name ?: '-' }}</td>
                     @if(in_array($level, ['adset', 'ad']))
-                        <td>{{ $row->adset_name ?? '—' }}</td>
+                        <td>{{ $row->adset_name ?: '-' }}</td>
                     @endif
                     @if($level === 'ad')
-                        <td>{{ $row->ad_name ?? '—' }}</td>
+                        <td>{{ $row->ad_name ?: '-' }}</td>
                     @endif
-                    <td class="text-right">Rp {{ number_format($row->spend, 0, ',', '.') }}</td>
-                    <td class="text-right">{{ number_format($row->impressions, 0, ',', '.') }}</td>
-                    <td class="text-right">{{ number_format($row->clicks, 0, ',', '.') }}</td>
-                    <td class="text-right">{{ number_format($row->reach, 0, ',', '.') }}</td>
-                    <td class="text-right">
-                        <span class="badge">
-                            {{ $row->impressions > 0 ? number_format(($row->clicks / $row->impressions) * 100, 2) : '0.00' }}%
-                        </span>
-                    </td>
+                    <td class="num">{{ $rp($row->spend) }}</td>
+                    <td class="num">{{ $conv($row->conversions) }}</td>
+                    <td class="num">{{ $perConv($row->spend, $row->conversions) }}</td>
+                    <td class="num">{{ $num($row->clicks) }}</td>
+                    <td class="num">{{ $ctr($row->clicks, $row->impressions) }}</td>
+                    <td class="num">{{ $num($row->impressions) }}</td>
+                    @if($show_reach)
+                        <td class="num">{{ $num($row->reach) }}</td>
+                    @endif
                 </tr>
             @empty
                 <tr>
-                    <td colspan="8" style="text-align: center; padding: 20px; color: #9ca3af;">
-                        Tidak ada data untuk periode ini.
-                    </td>
+                    <td colspan="{{ $detailColumns }}" class="empty">Tidak ada iklan yang tayang di periode ini.</td>
                 </tr>
             @endforelse
         </tbody>
     </table>
 
-    {{-- FOOTER --}}
     <div class="footer">
-        {{ $company->company_name ?? 'Ads Analytics' }} &mdash; Laporan ini digenerate secara otomatis pada {{ now()->format('d M Y, H:i') }} WIB
+        @if($synced_at)
+            Data terakhir disinkronkan dari {{ $platform_label }}: {{ $synced_at }}.
+        @endif
+        Laporan dibuat {{ $generated_at }}.
     </div>
 </body>
 </html>

@@ -7,11 +7,19 @@ use App\Http\Controllers\Controller;
 use App\Models\ClientAdAccount;
 use App\Models\CompanySetting;
 use App\Models\DailyAdMetric;
+use App\Services\Ads\AdsReportService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class ExportController extends Controller
 {
+    // Days with no spend, impressions or conversions are noise in a report
+    private const HAS_ACTIVITY = 'SUM(spend) > 0 OR SUM(impressions) > 0 OR SUM(conversions) > 0';
+
+    public function __construct(private AdsReportService $reports) {}
+
     /**
      * Validate and gather export data.
      */
@@ -29,23 +37,39 @@ class ExportController extends Controller
         $dateRange = [$validated['start_date'], $validated['end_date']];
 
         $account = ClientAdAccount::findOrFail($accountId);
+        $timezone = $account->timezone ?: config('app.timezone');
 
-        // Summary
-        $baseQuery = DailyAdMetric::where('client_ad_account_id', $accountId)
+        $baseQuery = fn () => DailyAdMetric::where('client_ad_account_id', $accountId)
             ->where('level', $level)
             ->whereBetween('date', $dateRange);
 
-        $summary = [
-            'total_spend' => (float) (clone $baseQuery)->sum('spend'),
-            'total_impressions' => (int) (clone $baseQuery)->sum('impressions'),
-            'total_clicks' => (int) (clone $baseQuery)->sum('clicks'),
-            'total_reach' => (int) (clone $baseQuery)->sum('reach'),
-            'ctr' => 0,
-        ];
+        // Summary
+        $sums = $baseQuery()
+            ->selectRaw('COALESCE(SUM(spend), 0) as spend, COALESCE(SUM(impressions), 0) as impressions, COALESCE(SUM(clicks), 0) as clicks, COALESCE(SUM(conversions), 0) as conversions, COALESCE(SUM(revenue), 0) as revenue')
+            ->first();
 
-        if ($summary['total_impressions'] > 0) {
-            $summary['ctr'] = round(($summary['total_clicks'] / $summary['total_impressions']) * 100, 2);
-        }
+        $summary = [
+            'total_spend' => (float) $sums->spend,
+            'total_impressions' => (int) $sums->impressions,
+            'total_clicks' => (int) $sums->clicks,
+            'total_conversions' => (float) $sums->conversions,
+            'ctr' => $sums->impressions > 0 ? round(($sums->clicks / $sums->impressions) * 100, 2) : 0,
+        ] + $this->reports->derivedMetrics((float) $sums->spend, (int) $sums->clicks, (float) $sums->conversions, (float) $sums->revenue);
+
+        // Period totals per campaign / ad set / ad, biggest spend first
+        [$idColumn, $nameColumn] = match ($level) {
+            'campaign' => ['campaign_id', 'campaign_name'],
+            'adset'    => ['adset_id', 'adset_name'],
+            'ad'       => ['ad_id', 'ad_name'],
+        };
+
+        $totals = $baseQuery()
+            ->select($idColumn, "{$nameColumn} as name")
+            ->selectRaw('SUM(spend) as spend, SUM(impressions) as impressions, SUM(clicks) as clicks, SUM(conversions) as conversions')
+            ->groupBy($idColumn, $nameColumn)
+            ->havingRaw(self::HAS_ACTIVITY)
+            ->orderByDesc('spend')
+            ->get();
 
         // Detail rows
         $groupColumns = match ($level) {
@@ -55,31 +79,56 @@ class ExportController extends Controller
         };
 
         $selectParts = array_merge($groupColumns, [
-            \DB::raw('SUM(spend) as spend'),
-            \DB::raw('SUM(impressions) as impressions'),
-            \DB::raw('SUM(clicks) as clicks'),
-            \DB::raw('SUM(reach) as reach'),
+            DB::raw('SUM(spend) as spend'),
+            DB::raw('SUM(impressions) as impressions'),
+            DB::raw('SUM(clicks) as clicks'),
+            DB::raw('SUM(reach) as reach'),
+            DB::raw('SUM(conversions) as conversions'),
         ]);
 
-        $rows = DailyAdMetric::where('client_ad_account_id', $accountId)
-            ->where('level', $level)
-            ->whereBetween('date', $dateRange)
+        $rows = $baseQuery()
             ->select($selectParts)
             ->groupBy($groupColumns)
+            ->havingRaw(self::HAS_ACTIVITY)
             ->orderBy('date')
             ->get();
 
         $company = CompanySetting::first();
 
+        // Same rule as the dashboard: a messaging action type means the conversions are WhatsApp chats
+        $conversionType = $account->conversion_action_type
+            ?: ($account->platform === 'meta' ? config('services.meta.default_conversion_action_type') : '');
+        $isMessaging = str_contains((string) $conversionType, 'messaging');
+
         return [
             'account' => $account,
             'level' => $level,
+            'level_label' => ['campaign' => 'Campaign', 'adset' => 'Ad set', 'ad' => 'Ad'][$level],
+            'platform_label' => $account->platform === 'google' ? 'Google Ads' : 'Meta Ads',
+            // The Google sync doesn't fetch reach, so its column would be all zeros
+            'show_reach' => $account->platform !== 'google',
+            'conversion_label' => $isMessaging ? 'Chat WA' : 'Konversi',
+            'cost_per_conversion_label' => $isMessaging ? 'Biaya per chat WA' : 'Biaya per konversi',
             'start_date' => $validated['start_date'],
             'end_date' => $validated['end_date'],
+            'period_label' => $this->formatDate($validated['start_date']) . ' s/d ' . $this->formatDate($validated['end_date']),
             'summary' => $summary,
+            'totals' => $totals,
             'rows' => $rows,
             'company' => $company,
+            'generated_at' => $this->formatDateTime(now($timezone)),
+            'synced_at' => $account->last_synced_at ? $this->formatDateTime($account->last_synced_at->copy()->setTimezone($timezone)) : null,
         ];
+    }
+
+    private function formatDate(string $date): string
+    {
+        return Carbon::parse($date)->locale('id')->translatedFormat('j M Y');
+    }
+
+    private function formatDateTime(Carbon $moment): string
+    {
+        return $moment->locale('id')->translatedFormat('j M Y H:i') . ' ' . $moment->format('T');
     }
 
     /**
