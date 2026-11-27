@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { AlertTriangle } from 'lucide-vue-next'
@@ -198,6 +198,10 @@ onBeforeUnmount(() => {
 })
 
 watch(points, renderMarkers)
+
+// Ganti tema menukar filter pada tile. Nudge Leaflet agar lapisan tile di-repaint,
+// supaya peta tidak blank sampai user zoom/geser.
+watch(isDark, () => nextTick(() => map?.invalidateSize({ animate: false })))
 </script>
 
 <template>
@@ -296,12 +300,15 @@ watch(points, renderMarkers)
   font-family: inherit;
 }
 
-/* Muted basemap so the dots carry the colour; dark mode inverts the OSM tiles */
-.geo-map .leaflet-tile-pane {
+/* Muted basemap so the dots carry the colour; dark mode inverts the OSM tiles.
+   Filter is on each tile (not the whole pane): a single filtered pane is one GPU
+   layer that Chrome often fails to repaint when the filter changes on theme toggle,
+   leaving the map blank until a zoom/pan. Per-tile filters repaint reliably. */
+.geo-map .leaflet-tile {
   filter: grayscale(0.85) contrast(0.95) brightness(1.03);
 }
 
-.geo-map--dark .leaflet-tile-pane {
+.geo-map--dark .leaflet-tile {
   filter: grayscale(1) invert(1) brightness(0.85) contrast(0.9);
 }
 
