@@ -1,17 +1,14 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { AlertTriangle } from 'lucide-vue-next'
-import { useDarkMode } from '@/composables/useDarkMode'
 
 const props = defineProps({
   geo: { type: Object, required: true },
   platform: { type: String, default: '' },
   conversionLabel: { type: String, default: 'Conv.' },
 })
-
-const { isDark } = useDarkMode()
 
 const PLATFORM_COLORS = { meta: '#0866FF', google: '#34A853' }
 const ABROAD_COLOR = '#F59E0B'
@@ -198,10 +195,6 @@ onBeforeUnmount(() => {
 })
 
 watch(points, renderMarkers)
-
-// Ganti tema menukar filter pada tile. Nudge Leaflet agar lapisan tile di-repaint,
-// supaya peta tidak blank sampai user zoom/geser.
-watch(isDark, () => nextTick(() => map?.invalidateSize({ animate: false })))
 </script>
 
 <template>
@@ -242,10 +235,10 @@ watch(isDark, () => nextTick(() => map?.invalidateSize({ animate: false })))
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
       <!-- Map -->
       <div class="relative isolate">
-        <div
-          ref="mapEl"
-          :class="['geo-map h-[340px] w-full overflow-hidden rounded-xl border border-border/60 sm:h-[420px]', isDark && 'geo-map--dark']"
-        />
+        <!-- Class statis: Leaflet menambah class sendiri (leaflet-container, dst.) ke elemen ini.
+             Binding :class reaktif membuat Vue menimpa className saat ganti tema, class Leaflet
+             hilang, lalu preflight Tailwind (img max-width:100%) mengecilkan tile jadi nol. -->
+        <div ref="mapEl" class="geo-map h-[340px] w-full overflow-hidden rounded-xl border border-border/60 sm:h-[420px]" />
         <div class="absolute right-2 top-2 z-[1000] flex gap-0.5 rounded-lg border border-border/60 bg-background/90 p-0.5 shadow-sm backdrop-blur">
           <button
             v-for="[key, view] in availableViews"
@@ -301,14 +294,13 @@ watch(isDark, () => nextTick(() => map?.invalidateSize({ animate: false })))
 }
 
 /* Muted basemap so the dots carry the colour; dark mode inverts the OSM tiles.
-   Filter is on each tile (not the whole pane): a single filtered pane is one GPU
-   layer that Chrome often fails to repaint when the filter changes on theme toggle,
-   leaving the map blank until a zoom/pan. Per-tile filters repaint reliably. */
+   Dark mode follows the .dark class useDarkMode puts on <html>, so the map element
+   itself never needs a reactive class (see the template comment). */
 .geo-map .leaflet-tile {
   filter: grayscale(0.85) contrast(0.95) brightness(1.03);
 }
 
-.geo-map--dark .leaflet-tile {
+.dark .geo-map .leaflet-tile {
   filter: grayscale(1) invert(1) brightness(0.85) contrast(0.9);
 }
 
