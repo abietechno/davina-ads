@@ -663,8 +663,10 @@ function formatLastSynced(v) {
             </CardContent>
           </Card>
 
-          <!-- ROAS only means something when the account reports purchase value -->
-          <Card v-if="stats.total_revenue > 0">
+          <!-- ROAS only means something when the account reports real purchase value.
+               Lead/WA conversions often carry Google's default value of 1 per conversion,
+               which makes total_revenue > 0 but rounds ROAS to 0.00, so gate on ROAS itself. -->
+          <Card v-if="stats.roas > 0">
             <CardHeader class="flex flex-row items-center justify-between pb-1 pt-4 px-4">
               <CardTitle class="text-xs font-medium text-muted-foreground">ROAS</CardTitle>
               <TrendingUp class="h-3.5 w-3.5 text-muted-foreground" />
